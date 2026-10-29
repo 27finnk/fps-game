@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Multiplayer FPS - Deathmatch</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            user-select: none;
+            background: #111;
+            color: #fff;
+        }
+
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 8px;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.8);
+            border: 2px solid #000;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        #hud {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px #000;
+        }
+
+        .hud-panel {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        #health-bar-container {
+            width: 200px;
+            height: 20px;
+            background: #444;
+            border-radius: 10px;
+            overflow: hidden;
+            border: 2px solid #000;
+        }
+
+        #health-bar {
+            width: 100%;
+            height: 100%;
+            background: #2ecc71;
+            transition: width 0.1s linear;
+        }
+
+        #ammo-display { font-size: 24px; color: #f1c40f; }
+        #weapon-display { font-size: 18px; color: #ecf0f1; }
+
+        #leaderboard {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 15px;
+            border-radius: 8px;
+            min-width: 180px;
+        }
+
+        #kill-feed {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            font-size: 14px;
+        }
+
+        .kill-msg {
+            background: rgba(0, 0, 0, 0.7);
+            padding: 5px 10px;
+            border-radius: 4px;
+            border-left: 4px solid #e74c3c;
+            animation: fadeOut 5s forwards;
+        }
+
+        @keyframes fadeOut {
+            0% { opacity: 1; }
+            80% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+
+        #menu-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            pointer-events: auto;
+            z-index: 100;
+        }
+
+        .menu-card {
+            background: #222;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            text-align: center;
+            max-width: 420px;
+            width: 100%;
+            border: 1px solid #444;
+        }
+
+        .menu-card h1 { margin-top: 0; color: #e74c3c; }
+
+        input, button {
+            width: 100%;
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 6px;
+            border: none;
+            box-sizing: border-box;
+            font-size: 16px;
+        }
+
+        input { background: #333; color: #fff; border: 1px solid #555; }
+
+        button {
+            background: #e74c3c;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        button:hover { background: #c0392b; }
+
+        #reload-indicator {
+            position: absolute;
+            top: 55%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-weight: bold;
+            color: #e74c3c;
+            display: none;
+        }
+    </style>
+    <!-- Three.js & PeerJS CDNs -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+
+    <div id="ui-layer">
+        <div id="crosshair"></div>
+        <div id="reload-indicator">RELOADING...</div>
+        
+        <div id="hud">
+            <div class="hud-panel">
+                <div id="health-bar-container"><div id="health-bar"></div></div>
+            </div>
+            <div class="hud-panel">
+                <div id="weapon-display">Weapon: Knife</div>
+                <div id="ammo-display">∞ / ∞</div>
+            </div>
+        </div>
+
+        <div id="leaderboard">
+            <h3 style="margin:0 0 10px 0; border-bottom: 1px solid #555;">Kills</h3>
+            <div id="score-list">You: 0</div>
+        </div>
+
+        <div id="kill-feed"></div>
+    </div>
+
+    <div id="menu-overlay">
+        <div class="menu-card">
+            <h1>FPS DEATHMATCH</h1>
+            <p style="font-size: 13px; color: #aaa;">Controls: WASD (Move), Space (Jump), Shift (Sprint), 1-4 (Weapons), R (Reload)</p>
+            <hr style="border-color: #444; margin: 15px 0;">
+            <p>Your Peer ID: <b id="my-id" style="color: #2ecc71;">Generating...</b></p>
+            
+            <button id="btn-copy-link" style="background: #27ae60;">📋 Copy Share Link (Google Chat / IG)</button>
+            <br>
+            <input type="text" id="join-id" placeholder="Enter Peer ID or Join Link">
+            <button id="btn-join">Join Game</button>
+            <button id="btn-play-solo" style="background: #3498db;">Host Game / Play Solo</button>
+        </div>
+    </div>
+
+    <script>
+        // --- WEAPON CONFIG ---
+        const WEAPONS = {
+            1: { name: 'Knife', magSize: Infinity, damage: 50, headshotMult: 1.5, fireRate: 400, reloadTime: 0, range: 3.5, type: 'melee' },
+            2: { name: 'Pistol', magSize: 6, damage: 25, headshotMult: 2.0, fireRate: 250, reloadTime: 1200, range: 100, type: 'raycast' },
+            3: { name: 'AK-47', magSize: 24, damage: 20, headshotMult: 2.5, fireRate: 100, reloadTime: 2000, range: 150, type: 'raycast' },
+            4: { name: 'Sniper', magSize: 1, damage: 70, headshotMult: 2.0, fireRate: 1000, reloadTime: 1800, range: 300, type: 'raycast' }
+        };
+
+        // --- GAME VARIABLES ---
+        let scene, camera, renderer;
+        let localPlayer = {
+            hp: 100,
+            weaponIndex: 1,
+            ammo: Infinity,
+            isReloading: false,
+            kills: 0,
+            pos: new THREE.Vector3(0, 1.8, 0),
+            velocity: new THREE.Vector3(),
+            canJump: false,
+            lastShotTime: 0,
+            bodyGroup: null,
+            heldGuns: {}
+        };
+
+        let mapColliders = []; // Bounding boxes for collision physics
+        let remotePlayers = {};
+        let peer, connections = {};
+        let myPeerId = '';
+        let isLocked = false;
+
+        const keys = {};
+        const cameraRotation = { yaw: 0, pitch: 0 };
+
+        // --- INITIALIZATION ---
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87ceeb);
+            scene.fog = new THREE.Fog(0x87ceeb, 10, 150);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // Lighting
+            scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(20, 50, 20);
+            dirLight.castShadow = true;
+            scene.add(dirLight);
+
+            // Setup World & Player
+            buildMap();
+            setupLocalPlayerBody();
+
+            // Setup Listeners
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('keydown', e => { keys[e.code] = true; handleKeyPress(e.code); });
+            document.addEventListener('keyup', e => keys[e.code] = false);
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mousedown', handleMouseDown);
+
+            initNetworking();
+            checkUrlForJoinCode();
+
+            animate();
+        }
+
+        // --- MAP & COLLISION GEOMETRY ---
+        function addSolidBox(x, y, z, w, h, d, color = 0x8b5a2b) {
+            const geo = new THREE.BoxGeometry(w, h, d);
+            const mat = new THREE.MeshStandardMaterial({ color });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(x, y, z);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+
+            // Add Bounding Box for Collision
+            const box = new THREE.Box3().setFromObject(mesh);
+            mapColliders.push(box);
+            return mesh;
+        }
+
+        function buildMap() {
+            // Floor
+            const floorGeo = new THREE.PlaneGeometry(100, 100);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            // Arena Outer Bounds / Boundary Walls
+            addSolidBox(0, 5, -50, 100, 10, 2, 0x555555); // North Wall
+            addSolidBox(0, 5, 50, 100, 10, 2, 0x555555);  // South Wall
+            addSolidBox(-50, 5, 0, 2, 10, 100, 0x555555); // West Wall
+            addSolidBox(50, 5, 0, 2, 10, 100, 0x555555);  // East Wall
+
+            // Obstacles & Cover Boxes
+            addSolidBox(0, 1.5, -10, 4, 3, 4);
+            addSolidBox(-10, 2, -5, 3, 4, 6);
+            addSolidBox(10, 1, 5, 4, 2, 2);
+            addSolidBox(-15, 2, 15, 3, 4, 3);
+            addSolidBox(15, 1.5, -15, 5, 3, 2);
+            addSolidBox(0, 2.5, 15, 6, 5, 2);
+        }
+
+        // --- WEAPON MODELS CREATION ---
+        function createGunMesh(index) {
+            const group = new THREE.Group();
+            
+            if (index === 1) { // Knife
+                const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.4, 0.1), new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8 }));
+                blade.position.set(0, 0.2, 0);
+                group.add(blade);
+                const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.2), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+                handle.position.set(0, -0.1, 0);
+                group.add(handle);
+                group.rotation.x = Math.PI / 3;
+            } else if (index === 2) { // Pistol
+                const body = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.15, 0.4), new THREE.MeshStandardMaterial({ color: 0x222222 }));
+                const handle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.25, 0.1), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+                handle.position.set(0, -0.15, 0.1);
+                group.add(body, handle);
+            } else if (index === 3) { // AK-47
+                const body = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.15, 0.9), new THREE.MeshStandardMaterial({ color: 0x444444 }));
+                const stock = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.2, 0.4), new THREE.MeshStandardMaterial({ color: 0x8b5a2b }));
+                stock.position.set(0, -0.05, 0.5);
+                const mag = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.3, 0.15), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+                mag.position.set(0, -0.2, -0.1);
+                mag.rotation.x = -0.3;
+                group.add(body, stock, mag);
+            } else if (index === 4) { // Sniper
+                const body = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.15, 1.3), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+                const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.4), new THREE.MeshStandardMaterial({ color: 0x000000 }));
+                scope.rotation.x = Math.PI / 2;
+                scope.position.set(0, 0.12, 0);
+                group.add(body, scope);
+            }
+
+            return group;
+        }
+
+        // --- LOCAL PLAYER BODY & FPS ARMS ---
+        function setupLocalPlayerBody() {
+            localPlayer.bodyGroup = new THREE.Group();
+
+            // Visible Body/Legs (seen when looking down)
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0x3498db });
+            const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 1.2), bodyMat);
+            torso.position.set(0, -0.8, 0);
+            torso.castShadow = true;
+
+            localPlayer.bodyGroup.add(torso);
+            camera.add(localPlayer.bodyGroup);
+            scene.add(camera);
+
+            // Attach 3D Weapons to Camera Frame
+            for (let i = 1; i <= 4; i++) {
+                const gunMesh = createGunMesh(i);
+                gunMesh.position.set(0.25, -0.25, -0.5);
+                gunMesh.visible = (i === 1); // Only Knife visible initially
+                camera.add(gunMesh);
+                localPlayer.heldGuns[i] = gunMesh;
+            }
+        }
+
+        // --- AVATAR FOR REMOTE PLAYERS ---
+        function createPlayerAvatar() {
+            const group = new THREE.Group();
+
+            // Torso
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 1.4), new THREE.MeshStandardMaterial({ color: 0x3498db }));
+            body.position.y = 0.7;
+            body.castShadow = true;
+            group.add(body);
+
+            // Head (Headshot collider)
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.35, 16, 16), new THREE.MeshStandardMaterial({ color: 0xe74c3c }));
+            head.position.y = 1.6;
+            head.name = "head";
+            head.castShadow = true;
+            group.add(head);
+
+            scene.add(group);
+            return group;
+        }
+
+        // --- CONTROLS & LOCK ---
+        function setupPointerLock() {
+            document.body.requestPointerLock();
+            document.getElementById('menu-overlay').style.display = 'none';
+            isLocked = true;
+        }
+
+        document.addEventListener('pointerlockchange', () => {
+            isLocked = (document.pointerLockElement === document.body);
+            if (!isLocked) {
+                document.getElementById('menu-overlay').style.display = 'flex';
+            }
+        });
+
+        function handleMouseMove(e) {
+            if (!isLocked) return;
+            const sensitivity = 0.002;
+            cameraRotation.yaw -= e.movementX * sensitivity;
+            cameraRotation.pitch -= e.movementY * sensitivity;
+            cameraRotation.pitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, cameraRotation.pitch));
+        }
+
+        function handleKeyPress(code) {
+            if (!isLocked) return;
+            if (code === 'KeyR') reloadWeapon();
+            if (code === 'Digit1') switchWeapon(1);
+            if (code === 'Digit2') switchWeapon(2);
+            if (code === 'Digit3') switchWeapon(3);
+            if (code === 'Digit4') switchWeapon(4);
+        }
+
+        function handleMouseDown(e) {
+            if (isLocked && e.button === 0) shoot();
+        }
+
+        function switchWeapon(index) {
+            if (localPlayer.isReloading) return;
+            localPlayer.heldGuns[localPlayer.weaponIndex].visible = false;
+            localPlayer.weaponIndex = index;
+            localPlayer.heldGuns[index].visible = true;
+
+            const weapon = WEAPONS[index];
+            localPlayer.ammo = weapon.magSize;
+            updateHUD();
+        }
+
+        function reloadWeapon() {
+            const weapon = WEAPONS[localPlayer.weaponIndex];
+            if (localPlayer.isReloading || localPlayer.ammo === weapon.magSize || weapon.magSize === Infinity) return;
+
+            localPlayer.isReloading = true;
+            document.getElementById('reload-indicator').style.display = 'block';
+
+            setTimeout(() => {
+                localPlayer.ammo = weapon.magSize;
+                localPlayer.isReloading = false;
+                document.getElementById('reload-indicator').style.display = 'none';
+                updateHUD();
+            }, weapon.reloadTime);
+        }
+
+        // --- SHOOTING & RAYCASTING ---
+        function shoot() {
+            const now = Date.now();
+            const weapon = WEAPONS[localPlayer.weaponIndex];
+
+            if (localPlayer.isReloading || now - localPlayer.lastShotTime < weapon.fireRate) return;
+            if (weapon.magSize !== Infinity && localPlayer.ammo <= 0) {
+                reloadWeapon();
+                return;
+            }
+
+            localPlayer.lastShotTime = now;
+            if (weapon.magSize !== Infinity) localPlayer.ammo--;
+            updateHUD();
+
+            // Recoil animation on held gun
+            const gunMesh = localPlayer.heldGuns[localPlayer.weaponIndex];
+            gunMesh.position.z += 0.1;
+            setTimeout(() => gunMesh.position.z -= 0.1, 50);
+
+            // Raycast Hit Scan
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+
+            let targets = [];
+            Object.keys(remotePlayers).forEach(id => {
+                remotePlayers[id].mesh.traverse(child => {
+                    if (child.isMesh) {
+                        child.playerId = id;
+                        targets.push(child);
+                    }
+                });
+            });
+
+            const intersects = raycaster.intersectObjects(targets);
+
+            if (intersects.length > 0) {
+                const hit = intersects[0];
+                if (hit.distance <= weapon.range) {
+                    const targetId = hit.object.playerId;
+                    const isHeadshot = (hit.object.name === 'head');
+                    let damage = weapon.damage * (isHeadshot ? weapon.headshotMult : 1.0);
+
+                    sendNetworkData({
+                        type: 'hit',
+                        target: targetId,
+                        damage: damage,
+                        isHeadshot: isHeadshot,
+                        attacker: myPeerId
+                    });
+                }
+            }
+        }
+
+        // --- PHYSICS & WALL COLLISION ---
+        function checkCollisions(nextPos) {
+            // Player Bounding Sphere Box Collision
+            const playerRadius = 0.5;
+            const playerBox = new THREE.Box3(
+                new THREE.Vector3(nextPos.x - playerRadius, nextPos.y - 1.5, nextPos.z - playerRadius),
+                new THREE.Vector3(nextPos.x + playerRadius, nextPos.y + 0.5, nextPos.z + playerRadius)
+            );
+
+            for (let collider of mapColliders) {
+                if (playerBox.intersectsBox(collider)) {
+                    return true; // Collision detected!
+                }
+            }
+            return false;
+        }
+
+        function updatePlayerMovement(delta) {
+            if (!isLocked) return;
+
+            const speed = keys['ShiftLeft'] ? 11 : 6.5;
+            const moveVector = new THREE.Vector3();
+
+            if (keys['KeyW']) moveVector.z -= 1;
+            if (keys['KeyS']) moveVector.z += 1;
+            if (keys['KeyA']) moveVector.x -= 1;
+            if (keys['KeyD']) moveVector.x += 1;
+
+            moveVector.normalize();
+            moveVector.applyEuler(new THREE.Euler(0, cameraRotation.yaw, 0, 'YXZ'));
+
+            localPlayer.velocity.x = moveVector.x * speed;
+            localPlayer.velocity.z = moveVector.z * speed;
+
+            if (keys['Space'] && localPlayer.canJump) {
+                localPlayer.velocity.y = 8;
+                localPlayer.canJump = false;
+            }
+
+            localPlayer.velocity.y -= 25 * delta; // Gravity
+
+            // Calculate proposed next positions step-by-step to prevent wall clipping
+            const nextX = localPlayer.pos.clone().add(new THREE.Vector3(localPlayer.velocity.x * delta, 0, 0));
+            if (!checkCollisions(nextX)) {
+                localPlayer.pos.x = nextX.x;
+            }
+
+            const nextZ = localPlayer.pos.clone().add(new THREE.Vector3(0, 0, localPlayer.velocity.z * delta));
+            if (!checkCollisions(nextZ)) {
+                localPlayer.pos.z = nextZ.z;
+            }
+
+            localPlayer.pos.y += localPlayer.velocity.y * delta;
+
+            // Floor collision check
+            if (localPlayer.pos.y <= 1.8) {
+                localPlayer.pos.y = 1.8;
+                localPlayer.velocity.y = 0;
+                localPlayer.canJump = true;
+            }
+
+            // Sync Camera Position & Rotation
+            camera.position.copy(localPlayer.pos);
+            camera.quaternion.setFromEuler(new THREE.Euler(cameraRotation.pitch, cameraRotation.yaw, 0, 'YXZ'));
+
+            // Broadcast transform to network peers
+            sendNetworkData({
+                type: 'transform',
+                pos: localPlayer.pos,
+                rot: { yaw: cameraRotation.yaw, pitch: cameraRotation.pitch }
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            updatePlayerMovement(0.016);
+            renderer.render(scene, camera);
+        }
+
+        // --- HUD & KILL SYSTEM ---
+        function updateHUD() {
+            const weapon = WEAPONS[localPlayer.weaponIndex];
+            document.getElementById('weapon-display').innerText = `Weapon: ${weapon.name}`;
+            document.getElementById('ammo-display').innerText = `${localPlayer.ammo === Infinity ? '∞' : localPlayer.ammo} / ${weapon.magSize === Infinity ? '∞' : weapon.magSize}`;
+            document.getElementById('health-bar').style.width = `${Math.max(0, localPlayer.hp)}%`;
+        }
+
+        function showKillFeed(msg) {
+            const feed = document.getElementById('kill-feed');
+            const div = document.createElement('div');
+            div.className = 'kill-msg';
+            div.innerText = msg;
+            feed.appendChild(div);
+            setTimeout(() => div.remove(), 5000);
+        }
+
+        function respawn() {
+            localPlayer.hp = 100;
+            localPlayer.pos.set((Math.random() - 0.5) * 30, 2, (Math.random() - 0.5) * 30);
+            updateHUD();
+        }
+
+        function takeDamage(amount, attackerId, isHeadshot) {
+            localPlayer.hp -= amount;
+            updateHUD();
+
+            if (localPlayer.hp <= 0) {
+                showKillFeed(`You were ${isHeadshot ? 'HEADSHOT' : 'killed'} by ${attackerId.substring(0, 5)}`);
+                sendNetworkData({ type: 'killed', victim: myPeerId, killer: attackerId });
+                respawn();
+            }
+        }
+
+        // --- PEERJS MULTIPLAYER & URL SHARING ---
+        function initNetworking() {
+            peer = new Peer();
+
+            peer.on('open', id => {
+                myPeerId = id;
+                document.getElementById('my-id').innerText = id;
+            });
+
+            peer.on('connection', conn => setupConnection(conn));
+        }
+
+        function checkUrlForJoinCode() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const joinCode = urlParams.get('join');
+            if (joinCode) {
+                document.getElementById('join-id').value = joinCode;
+            }
+        }
+
+        function connectToPeer(targetId) {
+            if (!targetId) return;
+            // Clean ID if full link was pasted into the input box
+            if (targetId.includes('?join=')) {
+                targetId = targetId.split('?join=')[1];
+            }
+            const conn = peer.connect(targetId);
+            setupConnection(conn);
+        }
+
+        function setupConnection(conn) {
+            conn.on('open', () => {
+                connections[conn.peer] = conn;
+                remotePlayers[conn.peer] = {
+                    mesh: createPlayerAvatar(),
+                    score: 0
+                };
+            });
+
+            conn.on('data', data => handleNetworkData(conn.peer, data));
+
+            conn.on('close', () => {
+                if (remotePlayers[conn.peer]) {
+                    scene.remove(remotePlayers[conn.peer].mesh);
+                    delete remotePlayers[conn.peer];
+                    delete connections[conn.peer];
+                }
+            });
+        }
+
+        function sendNetworkData(data) {
+            Object.values(connections).forEach(conn => {
+                if (conn.open) conn.send(data);
+            });
+        }
+
+        function handleNetworkData(senderId, data) {
+            if (data.type === 'transform') {
+                if (remotePlayers[senderId]) {
+                    remotePlayers[senderId].mesh.position.copy(data.pos);
+                    remotePlayers[senderId].mesh.rotation.y = data.rot.yaw;
+                }
+            } else if (data.type === 'hit') {
+                if (data.target === myPeerId) {
+                    takeDamage(data.damage, data.attacker, data.isHeadshot);
+                }
+            } else if (data.type === 'killed') {
+                if (data.killer === myPeerId) {
+                    localPlayer.kills++;
+                    showKillFeed(`You killed ${data.victim.substring(0, 5)}!`);
+                    updateLeaderboard();
+                }
+            }
+        }
+
+        function updateLeaderboard() {
+            let html = `You: ${localPlayer.kills}<br>`;
+            Object.keys(remotePlayers).forEach(id => {
+                html += `${id.substring(0, 5)}: ${remotePlayers[id].score}<br>`;
+            });
+            document.getElementById('score-list').innerHTML = html;
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- UI ACTIONS ---
+        document.getElementById('btn-play-solo').addEventListener('click', setupPointerLock);
+        
+        document.getElementById('btn-join').addEventListener('click', () => {
+            const targetId = document.getElementById('join-id').value.trim();
+            if (targetId) {
+                connectToPeer(targetId);
+                setupPointerLock();
+            }
+        });
+
+        document.getElementById('btn-copy-link').addEventListener('click', () => {
+            if (!myPeerId) {
+                alert("Connecting to server... try again in 2 seconds.");
+                return;
+            }
+            // Construct direct joining share URL
+            const joinUrl = `${window.location.origin}${window.location.pathname}?join=${myPeerId}`;
+            navigator.clipboard.writeText(joinUrl);
+            alert("Share Link Copied! Send this link to your friends via Google Chat, Instagram, Discord, etc.");
+        });
+
+        init();
+    </script>
+</body>
+</html>
